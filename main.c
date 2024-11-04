@@ -1,8 +1,8 @@
 /*******************************************************************************
  * File Name:   main.c
  *
- * Description: This is the source code for the Empty Application Example
- *              to be used as starting template.
+ * Description: This is the source code for the PSRAM XIP Example
+ *              for using Flash and PSRAM together.
  *
  * Related Document: See README.md
  *
@@ -43,50 +43,38 @@
 /*******************************************************************************
  * Header Files
  *******************************************************************************/
-#include "cyhal.h"
+ #include "cyhal.h"
 #include "cybsp.h"
 #include "cy_retarget_io.h"
+#include "cyhal_syspm.h"
+#include <stdint.h>
+#include <stdio.h>
 
 /*******************************************************************************
  * Macros
  *******************************************************************************/
 
-#define ADDRESS_SIZE (4u)         /* Memory address size */
-#define NUM_BYTES_PER_LINE (16u)  /* Number of bytes per line */
-#define BUFFER_SIZE (64u)         /* Size of buffer for read-write*/
-#define PSRAM_ADDRESS (0x2800000) /* PSRAM test address */
-#define TEST_DATA_1 (0xA5A5A5A5)  /* Test data 1 */
-#define TEST_DATA_2 (0x5A5A5A5A)  /* Test data 2 */
 
 /*******************************************************************************
  * Global Variables
  *******************************************************************************/
-cy_smif_psram_device_cfg_t psramCfg =
-    {
-        .readIdCmd = 0x9F,
-        .manufId = 0x0D,
-        .knownGoodDie = 0x5D,
-        .quadReadCmd = 0xEB,
-        .quadWriteCmd = 0x38,
-        .smifParams.selectHoldDelay = 0x01,
-        .smifParams.subPageNr = 0x01,
-};
+
+ /* Global array will be stored in PSRAM irrespective of the app Execution source */
+ __attribute__((section(".cy_psram_data")))
+volatile uint32_t psram_data_array[5] = {0xa5, 0x5a, 0xb6, 0x6b, 0xaa};
+
+/*Global array will be stored in Flash irrespective of the app Execution source*/
+__attribute__((section(".cy_xip_data")))
+volatile uint32_t flash_data_array[5] = {0xa5, 0x5a, 0xb6, 0x6b, 0xaa};
 
 /*******************************************************************************
  * Function Prototypes
  *******************************************************************************/
-static void check_status(char *message, uint32_t status);
-static void print_array(char *message, uint8_t *buf, uint32_t size);
-static cy_rslt_t memory_test(uint32_t test_data, uint32_t start_addr);
+void print_address_fn_psram(int (*ptr_to_fn)());
 
 /*******************************************************************************
  * Function Definitions
  *******************************************************************************/
-/**
- *
- * This structure specifies SMIF parameters for PSRAM device
- *
- */
 
 /*******************************************************************************
  * Function Name: main()
@@ -115,7 +103,7 @@ int main(void)
     {
         CY_ASSERT(0);
     }
-
+    cyhal_syspm_lock_deepsleep();
     /* Initialize retarget-io to use the debug UART port */
     result = cy_retarget_io_init(CYBSP_DEBUG_UART_TX, CYBSP_DEBUG_UART_RX,
                                  CY_RETARGET_IO_BAUDRATE);
@@ -132,142 +120,57 @@ int main(void)
 
     /* \x1b[2J\x1b[;H - ANSI ESC sequence for clear screen */
     printf("\x1b[2J\x1b[;H");
+#if defined(APPEXEC_RAM)
+    printf("\r\n*******Running application from RAM *******\r\n");
+#elif defined(APPEXEC_PSRAM)
+    printf("\r\n*******Running application from PSRAM in eXecute-In-Place(XIP) mode *******\r\n");
+#else
+    printf("\r\n*******Running application from External Flash in eXecute-In-Place(XIP) mode *******\r\n");
+#endif
 
-    printf("\r\n*******PSRAM Read and Write in eXecute-In-Place(XIP) mode *******\r\n");
+    print_address_fn_psram(main);
 
-    result = thread_ap_smif_psram_Init(&psramCfg);
-    if (result != TRUE)
-    {
-        printf("PSRAM init failed");
-        CY_ASSERT(0);
-    }
-
-    /* Perform read-write on PSRAM using test data */
-    result = memory_test(TEST_DATA_1, PSRAM_ADDRESS);
-    check_status("PSRAM read-write test failed", result);
-
-    /* Perform read-write on PSRAM using test data */
-    result = memory_test(TEST_DATA_2, PSRAM_ADDRESS);
-    check_status("PSRAM read-write test failed", result);
-
-    printf("\r\nPSRAM read-write successful.\n\r");
+    /*Print array addresses*/
+    printf("Address of psram_data_array: %p \r\n",psram_data_array);
+    printf("Address of flash_data_array: %p \r\n",flash_data_array);
 
     return 0;
 }
 
-/******************************************************************************
- * Function Name: print_array
- *******************************************************************************
- * Summary:
- *  Prints the content of the buffer to the UART console.
- *
- * Parameters:
- *  message - message to print before array output
- *  buf - buffer to print on the console.
- *  size - size of the buffer.
- *
- * Return:
- *  void
- *
- ******************************************************************************/
-static void print_array(char *message, uint8_t *buf, uint32_t size)
-{
-    printf("\r\n%s (%u bytes):\r\n", message, (unsigned int)size);
-    printf("-------------------------\r\n");
-
-    for (uint32_t index = 0; index < size; index++)
-    {
-        printf("0x%02X ", buf[index]);
-
-        if (0u == ((index + 1) % NUM_BYTES_PER_LINE))
-        {
-            printf("\r\n");
-        }
-    }
-}
+/*******************************************************************************
+ * Function Definitions
+ *******************************************************************************/
 
 /*******************************************************************************
- * Function Name: check_status
+ * Function Name: print_address_fn_psram()
  ********************************************************************************
  * Summary:
- *  Prints the message, indicates the non-zero status by turning the LED on, and
- *  asserts the non-zero status.
+ * This is the function that prints the address of functions.
  *
  * Parameters:
- *  message - message to print if status is non-zero.
- *  status - status for evaluation.
+ *  int (*ptr_to_fn)() : Pointer to a function that takes no parameters and returns
+ *                       integer.
  *
  * Return:
  *  void
  *
  *******************************************************************************/
-static void check_status(char *message, uint32_t status)
+
+__attribute__((section(".cy_psram_func")))
+void print_address_fn_psram(int (*ptr_to_fn)())
 {
-    if (status)
-    {
-        printf("\n\r====================================================\n\r");
-        printf("\n\rFAIL: %s\n\r", message);
-        printf("Error Code: 0x%x\n\r", (int)status);
-        printf("\n\r=====================================================\n\r");
-        /* On failure, turn the LED ON */
-        cyhal_gpio_write(CYBSP_USER_LED, CYBSP_LED_STATE_ON);
-        while (true)
-            ; /* Wait forever here when error occurs. */
-    }
+    uint32_t local_variable=0;
+    /* The least significant bit in function address indicates whether the function contains Thumb instructions or not 
+    and hence should not be considered while printing function address hence subtracting 1 from the address before printing.
+    From ARM: "If you have a Thumb function, that is a function consisting of Thumb code, and that runs in Thumb state,
+     then any pointer to that function must have the least significant bit set."
+    */
+    /*Print Function addresses*/
+    printf("Address of main : %p \r\n",((void *)ptr_to_fn) -1);
+    printf("Address of print_address_fn_psram : %p \r\n",((void *)print_address_fn_psram)-1);
+
+    /*Print local variable address*/
+    printf("Address of local_variable: %p \r\n",&local_variable);
+
 }
-
-/******************************************************************************
- * Function Name: memory_test
- *******************************************************************************
- * Summary:
- *  Test read and write to PSRAM by writing the test_data of the BUFFER_SIZE to
- *  start_addr
- *
- * Parameters:
- *  test_data: 32-bit data for read and write.
- *  start_addr: memory address where you need to read-write test data.
- *
- * Return:
- *  cy_rslt_t - status of memory test is 0 if passed. otherwise failed.
- *
- ******************************************************************************/
-static cy_rslt_t memory_test(uint32_t test_data, uint32_t start_addr)
-{
-    uint32_t *location_ptr = (uint32_t *)start_addr;
-    cy_rslt_t status = 0;
-
-    printf("\r\nWriting data 0x%X to %d bytes memory starting from 0x%X\n\r",
-           (int)test_data, BUFFER_SIZE, (int)start_addr);
-
-    for (int i = 0; i < BUFFER_SIZE / 4; i++)
-    {
-        *location_ptr = test_data;
-        location_ptr++;
-    }
-
-    location_ptr = (uint32_t *)start_addr;
-
-    printf("\r\nReading from memory at 0x%X\n\r", (int)start_addr);
-
-    /* Print the read data in array*/
-    print_array("Read Data", (uint8_t *)location_ptr, BUFFER_SIZE);
-
-    /* Check read data matches with written data */
-    for (int i = 0; i < BUFFER_SIZE / 4; i++)
-    {
-        if (*location_ptr != test_data)
-        {
-            printf("\n\rRead data doesn't match written data at 0%X\n\r",
-                   (int)(start_addr + (i * 4)));
-            status++;
-        }
-        location_ptr++;
-    }
-
-    if (status)
-        printf("PSRAM Test failed for %d address location(s).\n\r", (int)status);
-
-    return status;
-}
-
 /* [] END OF FILE */

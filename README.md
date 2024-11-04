@@ -1,6 +1,6 @@
 #  PSRAM Read and Write
 
-This code example demonstrates how to interface with an external PSRAM using Serial Memory Interface (SMIF) PDL in CYW955913EVK-01 EVK. It also demonstrates how to perform read and write operations in CYW955913EVK-01 EVK.
+This code example demonstrates how to use an external PSRAM interfaced using Serial Memory Interface (SMIF) in CYW955913EVK-01 EVK. It demonstrates how data and functions can be moved to PSRAM using the provided custom compiler attributes.
 
 [View this README on GitHub.](https://github.com/Infineon/mtb-example-threadx-psram)
 
@@ -30,8 +30,6 @@ This example uses the kit’s default configuration. See the kit user guide to e
 See the [ModusToolbox&trade; tools package installation guide](https://www.infineon.com/ModusToolboxInstallguide) for information about installing and configuring the tools package.
 
 Install a terminal emulator if you don't have one. Instructions in this document use [Tera Term](https://teratermproject.github.io/index-en.html).
-
-Install a Python interpreter if you don't have one. This code example is tested using [Python v3.7.7](https://www.python.org/downloads/release/python-377/).
 
 
 ## Using the code example
@@ -167,12 +165,15 @@ For more details, see the [ModusToolbox&trade; tools package user guide](https:/
       ```
    </details>
 
-4. After programming, reset the board to start the application. Verify the output in serial terminal **Figure 1** . 
-
-   
-    **Figure 1. psram read-write status**
-   
-    ![](images/cases.png)
+4. After programming, reset the board to start the application. Verify the output in serial terminal is as shown below. The application is set to execute from psram by default.
+```
+*******Running application from PSRAM in eXecute-In-Place(XIP) mode *******
+Address of main : 0x2800a10
+Address of print_address_fn_psram : 0x2800000
+Address of local_variable: 0x8042e654
+Address of psram_data_array: 0x28051e0
+Address of flash_data_array: 0x691648
+```
 
 
 ## Debugging
@@ -198,19 +199,49 @@ Follow the instructions in your preferred IDE.
 
 
 ## Design and implementation
+CYW559xx devices support application execution from flash, RAM and PSRAM. This Code example demonstrates how the complete application can be run from the PSRAM and also how data and the functions can be moved to PSRAM in case the application execution is from flash or RAM. The below table describes some of the functions and variables used to demonstrate the same along with the relevant attributes used for the same.
 
-### Resources and settings
+|Resource | Attribute | Description|
+----------|---------------|------------|
+main | none | This is the main function with no special attributes, the address of this function will depend on the application execution source.
+print_address_fn_psram| __attribute__((section(".cy_psram_func"))) | This is the function that prints the address of the main function and has a custom section attribute ".cy_psram_func" applied to it. This basically means that this function will always reside in the psram irrepective of the application execution source.
+Local_variable | None| This is a local variable created inside print_address_fn_psram to show what happens with local variables when application execution source changes.
+psram_data_array| __attribute__((section(".cy_psram_data")))| Global array that will be stored in PSRAM irrespective of the app Execution source 
+flash_data_array| __attribute__((section(".cy_xip_data")))| Global array that will be stored in Flash irrespective of the app Execution source
+
+</br>
+
+The application by default is set to execute from PSRAM. This is done by setting `APPEXEC=psram` in the makefile with `ram` and `flash` being other options. Addresses of function and variables for specific APPEXEC environment are shown in the table below:
 
 
-**Table 1. Application resources**
+|Function/Variables | APPEXEC=PSRAM | APPEXEC=FLASH | APPEXEC=ram|
+--------------------|---------------|---------------|------------|
+main    | 0x2800a10| 0x692034 | 0x804aaf60
+print_address_fn_psram| 0x2800000 | 0x2800000 | 0x2800000
+Local_variable (print_address_fn)| 0x8042e654| 0x8042e654 | 0x8042e654
+psram_data_array| 0x28051e0| 0x2800040| 0x2800040
+flash_data_array| 0x691648| 0x691648| 0x691648
 
- Resource  |  Alias/object     |    Purpose
- :------- | :------------    | :-----------
- UART (HAL) |cy_retarget_io_uart_obj| UART HAL object used by Retarget-IO for the Debug UART port
- LED (BSP) | CYBSP_USER_LED | User LED to show the output
-<br>
+```
+Note: 
+The least significant bit in function address indicates whether the function contains Thumb instructions or not and hence should not be considered while printing function address hence last bit should be removed from the address before printing.
+From ARM: "If you have a Thumb function, that is a function consisting of Thumb code, and that runs in Thumb state, then any pointer to that function must have the least significant bit set."
 
+```
+looking at the above table and the map file (present in the build directory of the project) `Memory Configuration` section we can determine the location of these functions and variables in the memory for the correctness.
 
+```
+Memory Configuration
+
+Name             Origin             Length             Attributes
+ram_pre_init     0x804af868         0x00000004         r
+ram              0x80417720         0x00097ae0         xrw
+psram            0x02800000         0x00800000         xrw
+xip              0x0069163c         0x00f5e9e0         xr
+log_section      0x81000004         0x00100000         r
+*default*        0x00000000         0xffffffff
+```
+Taking `APPEXEC=psram` as an example we can see that `main` is located in the psram section as its addresse starts with `0x28`, same is the case for `print_address_fn_psram` and `psram_data_array`. The local variable `Local_variable` inside the function `print_address_fn_psram` resides in the stack on RAM and hence its address `0x8042e654` is in the RAM region between `0x80417720` and `0x804AF200` similarly we can deduce that `flash_data_array` with its address `0x691648` lies in the flash address space.
 ## Related resources
 
 Resources  | Links
@@ -233,6 +264,7 @@ Document title: *CE239838* - *PSRAM Read and Write*
  Version | Description of change
  ------- | ---------------------
  1.0.0   | New code example
+ 1.1.0   | Updated to use compiler attribute sections|
 
 
 

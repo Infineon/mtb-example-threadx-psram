@@ -137,7 +137,25 @@ PREBUILD=
 
 # Custom post-build commands to run.
 POSTBUILD=
+# APPEXEC=psram will move the entire App to PSRAM and execute from there except functions with .cy_ramfunc section attribute
+# if APPEXEC=flash or ram then only the data and functions using .cy_psram_data and .cy_psram_func section 
+#  attribute will be moved to PSRAM 
 
+APPEXEC = psram
+
+ifeq ($(APPEXEC),psram)
+DEFINES+=APPEXEC_PSRAM
+endif
+ifeq ($(APPEXEC),ram)
+DEFINES+=APPEXEC_RAM
+endif
+
+# Set XIP=0 to execute the complete app from RAM, the app is copied to RAM from flash before executing.
+# XIP=0
+
+# ifeq ($(XIP),0)
+# DEFINES+=XIP_RAM
+# endif
 
 ################################################################################
 # Paths
